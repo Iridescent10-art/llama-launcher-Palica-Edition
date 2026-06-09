@@ -17,6 +17,8 @@ from pathlib import Path
 from datetime import datetime
 import atexit
 import sys
+import webbrowser
+
 
 # ════════════════════════════════════════════════════════════════
 #  隐藏控制台窗口
@@ -390,6 +392,20 @@ class LLMauncher:
             self._guide_find_server()
         elif need_models:
             self._guide_find_models()
+    def _check_first_run(self):
+        server = self.server_var.get().strip()
+        models = self.dir_var.get().strip()
+        need_server = not server or not os.path.isfile(server)
+        need_models = not models or not os.path.isdir(models)
+        if not need_server and not need_models:
+            # 默认路径都正确，跳过引导弹窗
+            self.log_msg("✓ 已自动加载配置，路径校验通过", "success")
+            return
+        if need_server:
+            self._guide_find_server()
+        elif need_models:
+            self._guide_find_models()
+
 
     def _guide_find_server(self):
         result = messagebox.askyesno(
@@ -1463,13 +1479,25 @@ class LLMauncher:
         self.speed_time_spinbox.pack(side=tk.LEFT, padx=(4, 4))
         ttk.Label(r7, text="秒 (速度显示保留时间)", font=("Microsoft YaHei", 9), foreground="#888").pack(side=tk.LEFT)
 
+        # ── 性能参数变化时实时更新显存预估 ──       # ← 新增开始
+        for v in (self.gpu_var, self.ctx_var, self.batch_var, self.parallel_var):
+            v.trace_add("write", lambda *a: self._update_vram_estimate())
+        # ── 新增结束 ──
+
+        # 按钮行
+        btn_frame = ttk.Frame(main)
+
+
         # 按钮行
         btn_frame = ttk.Frame(main)
         btn_frame.pack(fill=tk.X, pady=(6, 8))
         self.start_btn = ttk.Button(btn_frame, text="▶  启动服务", style="Big.TButton", command=self.start_server)
         self.start_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 6))
+        self.webui_btn = ttk.Button(btn_frame, text="🌐 打开WebUI", style="Big.TButton", command=self.open_webui, state=tk.DISABLED)  # ← 新增
+        self.webui_btn.pack(side=tk.LEFT, padx=(0, 6))  # ← 新增
         self.stop_btn = ttk.Button(btn_frame, text="■  停止", style="Big.TButton", command=self.stop_server, state=tk.DISABLED)
         self.stop_btn.pack(side=tk.LEFT, padx=(0, 6))
+
         ttk.Button(btn_frame, text="退出", style="Big.TButton", command=self.on_close).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Button(btn_frame, text="使用说明", style="Reset.TButton", command=self._show_usage_guide).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Button(btn_frame, text="恢复默认", style="Reset.TButton", command=self.reset_to_default).pack(side=tk.LEFT)
@@ -2137,7 +2165,9 @@ class LLMauncher:
                             self.server_ready = True
                             self.log_line_threadsafe("✓ 服务器就绪", "success")
                             self._show_idle()
+                            self._ui_call(lambda: self.webui_btn.config(state=tk.NORMAL))  # ← 新增
                         return
+
                 except Exception:
                     pass
                 time.sleep(1)
@@ -2178,6 +2208,16 @@ class LLMauncher:
 
         self.root.after(0, self._on_server_stopped)
         self.root.after(200, lambda: self.log_line_threadsafe("✓ 服务已停止", "success"))
+    
+    def open_webui(self):
+        """在默认浏览器中打开 WebUI"""
+        port = self.port_var.get()
+        url = f"http://127.0.0.1:{port}/"
+        try:
+            webbrowser.open(url)
+            self.log_msg(f"已打开 WebUI: {url}", "info")
+        except Exception as e:
+            self.log_msg(f"打开浏览器失败: {e}", "error")
 
     def _on_server_stopped(self):
         self._is_running = False
@@ -2185,7 +2225,9 @@ class LLMauncher:
         self._set_controls_state("normal")
 
         self.start_btn.config(state=tk.NORMAL)
+        self.webui_btn.config(state=tk.DISABLED)  # ← 新增
         self.stop_btn.config(state=tk.DISABLED)
+
         self._stopping = False
         self._show_stopped()
         self._clear_webui_display()
